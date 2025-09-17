@@ -1,24 +1,30 @@
-import express from "express";
-import fetch from "node-fetch";
-import cors from "cors";
+const express = require("express");
+const fetch = require("node-fetch");
+const cors = require("cors");
 
 const app = express();
 app.use(cors());
 
-// Helper to fetch NSE API
+const PORT = process.env.PORT || 3000;
+
+// NSE API endpoints
+const endpoints = {
+  ipos: "https://www.nseindia.com/api/ipo-current-issues",
+  gainers: "https://www.nseindia.com/api/live-analysis-variations?index=gainers",
+  losers: "https://www.nseindia.com/api/live-analysis-variations?index=loosers"
+};
+
+// Helper: fetch with NSE headers
 async function fetchNSE(url) {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115.0 Safari/537.36",
-        Accept: "application/json",
-      },
-    });
-    return await res.json();
-  } catch (err) {
-    return { error: err.message };
-  }
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115 Safari/537.36",
+      "Accept": "application/json",
+      "Referer": "https://www.nseindia.com/"
+    }
+  });
+  return res.json();
 }
 
 // Routes
@@ -27,24 +33,32 @@ app.get("/", (req, res) => {
 });
 
 app.get("/ipos", async (req, res) => {
-  const data = await fetchNSE("https://www.nseindia.com/api/ipo-current-issues");
-  res.json(data);
+  try {
+    const data = await fetchNSE(endpoints.ipos);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/gainers", async (req, res) => {
-  const data = await fetchNSE(
-    "https://www.nseindia.com/api/live-analysis-variations?index=gainers"
-  );
-  res.json(data);
+  try {
+    const data = await fetchNSE(endpoints.gainers);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/losers", async (req, res) => {
-  const data = await fetchNSE(
-    "https://www.nseindia.com/api/live-analysis-variations?index=loosers"
-  );
-  res.json(data);
+  try {
+    const data = await fetchNSE(endpoints.losers);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Port (for local testing)
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Proxy running on port ${PORT}`);
+});
