@@ -1,64 +1,80 @@
-const express = require("express");
-const fetch = require("node-fetch");
-const cors = require("cors");
+import express from "express";
+import fetch from "node-fetch";
 
 const app = express();
-app.use(cors());
-
 const PORT = process.env.PORT || 3000;
 
-// NSE API endpoints
-const endpoints = {
-  ipos: "https://www.nseindia.com/api/ipo-current-issues",
-  gainers: "https://www.nseindia.com/api/live-analysis-variations?index=gainers",
-  losers: "https://www.nseindia.com/api/live-analysis-variations?index=loosers"
-};
+// NSE base API endpoints
+const NSE_BASE = "https://www.nseindia.com/api";
 
-// Helper: fetch with NSE headers
-async function fetchNSE(url) {
-  const res = await fetch(url, {
+// ✅ Common fetch with headers
+async function fetchWithUA(url) {
+  const response = await fetch(url, {
     headers: {
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115 Safari/537.36",
-      "Accept": "application/json",
-      "Referer": "https://www.nseindia.com/"
-    }
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115.0 Safari/537.36",
+      Accept: "application/json",
+    },
   });
-  return res.json();
+  return response;
 }
 
-// Routes
+// ---------- ROUTES ----------
+
+// Health check
 app.get("/", (req, res) => {
   res.json({ status: "NSE Proxy Running ✅" });
 });
 
+// IPOs
 app.get("/ipos", async (req, res) => {
   try {
-    const data = await fetchNSE(endpoints.ipos);
-    res.json(data);
+    const response = await fetchWithUA(`${NSE_BASE}/ipo-current-issues`);
+    const text = await response.text();
+
+    try {
+      // Try to parse JSON
+      const json = JSON.parse(text);
+      res.json(json);
+    } catch (err) {
+      // If parsing fails, send trimmed HTML (so it doesn’t break)
+      res.json({
+        error: "IPO endpoint did not return JSON",
+        preview: text.slice(0, 500),
+      });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// Gainers
 app.get("/gainers", async (req, res) => {
   try {
-    const data = await fetchNSE(endpoints.gainers);
-    res.json(data);
+    const response = await fetchWithUA(
+      `${NSE_BASE}/live-analysis-variations?index=gainers`
+    );
+    const json = await response.json();
+    res.json(json);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// Losers
 app.get("/losers", async (req, res) => {
   try {
-    const data = await fetchNSE(endpoints.losers);
-    res.json(data);
+    const response = await fetchWithUA(
+      `${NSE_BASE}/live-analysis-variations?index=loosers`
+    );
+    const json = await response.json();
+    res.json(json);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// ---------- START (local only, Vercel auto handles prod) ----------
 app.listen(PORT, () => {
-  console.log(`Proxy running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
