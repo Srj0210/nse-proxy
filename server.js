@@ -1,11 +1,11 @@
 import express from "express";
 import fetch from "node-fetch";
-import * as cheerio from "cheerio"; // for scraping backup sites
+import * as cheerio from "cheerio";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ---- Helper fetch ----
+// ---- Helpers ----
 async function fetchJSON(url, headers = {}) {
   const res = await fetch(url, {
     headers: {
@@ -19,25 +19,19 @@ async function fetchJSON(url, headers = {}) {
 }
 
 async function fetchHTML(url) {
-  const res = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0" }
-  });
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
   if (!res.ok) throw new Error("Failed HTML: " + url);
   return res.text();
 }
 
-// ---- Routes ----
-
 // ✅ IPOs
 app.get("/ipos", async (req, res) => {
   try {
-    // NSE IPO endpoint
     const url = "https://www.nseindia.com/api/ipo-current-issues";
     const data = await fetchJSON(url);
     return res.json(data);
   } catch (err) {
     console.log("NSE IPO failed, trying ET Markets...");
-    // Backup: Economic Times IPO scrape
     const html = await fetchHTML("https://economictimes.indiatimes.com/markets/ipos");
     const $ = cheerio.load(html);
     const ipos = [];
@@ -111,7 +105,7 @@ app.get("/picks", async (req, res) => {
 
 // ✅ Status
 app.get("/", (req, res) => {
-  res.json({ status: "🚀 NSE Proxy Running (No fallback, always alternate sources)" });
+  res.json({ status: "🚀 NSE Proxy Running", endpoints: ["/ipos", "/gainers", "/losers", "/picks"] });
 });
 
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
