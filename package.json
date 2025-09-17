@@ -1,6 +1,7 @@
 {
   "name": "nse-proxy",
   "version": "1.0.0",
+  "description": "NSE India Proxy without fallback (live IPO, gainers, losers, picks)",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -8,6 +9,7 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "cron": "^3.1.6"
   }
 }
