@@ -1,101 +1,108 @@
 import express from "express";
 import fetch from "node-fetch";
+import cron from "node-cron";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-let NSE_COOKIE = ""; // store NSE cookie
+// ================== CONFIG ==================
+let nseCookies = null;
+let nseHeaders = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  Accept: "application/json",
+  "Accept-Language": "en-US,en;q=0.9",
+  Connection: "keep-alive",
+};
 
-// Step 1: Cookie fetcher
-async function refreshCookie() {
+// NSE URLs
+const NSE_URLS = {
+  ipo: "https://www.nseindia.com/api/ipo-current-issues",
+  gainers: "https://www.nseindia.com/api/live-analysis-variations?index=gainers",
+  losers: "https://www.nseindia.com/api/live-analysis-variations?index=losers",
+  picks: "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050",
+};
+
+// ================== COOKIE REFRESH ==================
+async function refreshCookies() {
   try {
-    const res = await fetch("https://www.nseindia.com", {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-      },
-    });
-    const setCookie = res.headers.get("set-cookie");
-    if (setCookie) {
-      NSE_COOKIE = setCookie.split(";")[0];
-      console.log("✅ NSE Cookie refreshed:", NSE_COOKIE);
-    } else {
-      console.error("❌ Cookie not found");
+    console.log("🔄 Refreshing NSE cookies...");
+    const res = await fetch("https://www.nseindia.com", { headers: nseHeaders });
+    if (res.ok) {
+      const setCookies = res.headers.raw()["set-cookie"];
+      if (setCookies) {
+        nseCookies = setCookies.map((c) => c.split(";")[0]).join("; ");
+        console.log("✅ NSE cookies updated");
+      }
     }
   } catch (err) {
-    console.error("Cookie fetch failed:", err.message);
+    console.error("❌ Cookie refresh failed:", err.message);
   }
 }
 
-// Step 2: NSE fetch function
-async function fetchNSE(url) {
+// Run immediately on start
+await refreshCookies();
+
+// Run every 15 minutes
+cron.schedule("*/15 * * * *", refreshCookies);
+
+// ================== FETCH FUNCTION ==================
+async function fetchFromNSE(url) {
   try {
-    if (!NSE_COOKIE) await refreshCookie(); // first time
     const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        Accept: "application/json",
-        Referer: "https://www.nseindia.com/",
-        Cookie: NSE_COOKIE,
-      },
-      timeout: 10000,
+      headers: { ...nseHeaders, Cookie: nseCookies },
     });
 
-    if (res.status === 401 || res.status === 403) {
-      console.log("⚠️ Cookie expired, refreshing...");
-      await refreshCookie();
-      return fetchNSE(url); // retry
-    }
-
-    if (!res.ok) throw new Error(`Bad response ${res.status}`);
+    if (!res.ok) throw new Error("NSE fetch failed " + res.status);
     return await res.json();
   } catch (err) {
-    console.error("NSE fetch failed:", err.message);
-    return { error: "❌ Live NSE fetch failed", url };
+    console.error("❌ Fetch error:", err.message);
+    throw err;
   }
 }
 
-// Routes
+// ================== ROUTES ==================
 app.get("/", (req, res) => {
-  res.json({ status: "✅ NSE Proxy Live (Auto-cookie + 15min cron)" });
-});
-
-app.get("/gainers", async (req, res) => {
-  const data = await fetchNSE(
-    "https://www.nseindia.com/api/live-analysis-variations?index=gainers"
-  );
-  res.json(data);
-});
-
-app.get("/losers", async (req, res) => {
-  const data = await fetchNSE(
-    "https://www.nseindia.com/api/live-analysis-variations?index=losers"
-  );
-  res.json(data);
+  res.json({ status: "✅ NSE Proxy Live", fallback: false });
 });
 
 app.get("/ipos", async (req, res) => {
-  const data = await fetchNSE("https://www.nseindia.com/api/ipo-current-issues");
-  res.json(data);
-});
-
-// Economic Times news
-app.get("/news", async (req, res) => {
   try {
-    const data = await fetch(
-      "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms"
-    );
-    const text = await data.text();
-    res.type("xml").send(text);
-  } catch (e) {
-    res.type("xml").send("<rss>Error loading news</rss>");
+    const data = await fetchFromNSE(NSE_URLS.ipo);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "NSE IPO fetch failed" });
   }
 });
 
-// Start server
+app.get("/gainers", async (req, res) => {
+  try {
+    const data = await fetchFromNSE(NSE_URLS.gainers);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "NSE Gainers fetch failed" });
+  }
+});
+
+app.get("/losers", async (req, res) => {
+  try {
+    const data = await fetchFromNSE(NSE_URLS.losers);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "NSE Losers fetch failed" });
+  }
+});
+
+app.get("/picks", async (req, res) => {
+  try {
+    const data = await fetchFromNSE(NSE_URLS.picks);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "NSE Picks fetch failed" });
+  }
+});
+
+// ================== START ==================
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  refreshCookie(); // first fetch
-  setInterval(refreshCookie, 15 * 60 * 1000); // 🔄 refresh every 15 min
 });
