@@ -1,103 +1,102 @@
 import express from "express";
 import fetch from "node-fetch";
-import cron from "node-cron";
+import * as cheerio from "cheerio";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-let NSE_COOKIE = "";
-let NSE_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+// 📰 Economic Times RSS (news ke liye)
+const NEWS_URL = "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms";
 
-// Function to refresh NSE cookies
-async function refreshCookie() {
-  try {
-    const res = await fetch("https://www.nseindia.com", {
-      headers: {
-        "User-Agent": NSE_USER_AGENT,
-        Accept: "text/html",
-      },
-    });
+// 📈 Yahoo Finance for movers
+const YAHOO_GAINERS = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_gainers_in";
+const YAHOO_LOSERS = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_losers_in";
 
-    const cookies = res.headers.get("set-cookie");
-    if (cookies) {
-      NSE_COOKIE = cookies;
-      console.log("✅ NSE Cookie refreshed");
-    } else {
-      console.log("⚠️ Cookie not received, retry later");
-    }
-  } catch (err) {
-    console.error("❌ Cookie refresh failed:", err.message);
-  }
-}
+// 📅 Chittorgarh IPO Calendar
+const CHITTORGARH_IPO_URL = "https://www.chittorgarh.com/report/ipo-calendar/84/";
 
-// Wrapper to call NSE APIs
-async function fetchNSE(url) {
+async function fetchHTML(url) {
   try {
     const res = await fetch(url, {
-      headers: {
-        "User-Agent": NSE_USER_AGENT,
-        Accept: "application/json",
-        Cookie: NSE_COOKIE,
-        Referer: "https://www.nseindia.com/",
-      },
+      headers: { "User-Agent": "Mozilla/5.0" }
     });
-
-    const text = await res.text();
-
-    // Agar HTML aya toh block hua
-    if (text.startsWith("<")) {
-      throw new Error("Blocked by NSE (Captcha/HTML received)");
-    }
-
-    return JSON.parse(text);
+    if (!res.ok) throw new Error(`Failed ${url}: ${res.status}`);
+    return await res.text();
   } catch (err) {
-    return { error: "❌ " + err.message, url };
+    return null;
   }
 }
 
-// API Routes
-app.get("/", (req, res) => {
-  res.json({ status: "✅ NSE Proxy Live, Cookie Handling Enabled" });
-});
+async function fetchJSON(url) {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" }
+    });
+    if (!res.ok) throw new Error(`Failed ${url}: ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    return null;
+  }
+}
 
-app.get("/ipos", async (req, res) => {
-  const data = await fetchNSE(
-    "https://www.nseindia.com/api/ipo-current-issues"
-  );
-  res.json(data);
-});
+// 📅 Scrape IPOs from Chittorgarh
+async function getIPOs() {
+  const html = await fetchHTML(CHITTORGARH_IPO_URL);
+  if (!html) return [{ name: "No IPO data" }];
 
-app.get("/gainers", async (req, res) => {
-  const data = await fetchNSE(
-    "https://www.nseindia.com/api/live-analysis-equity-gainers"
-  );
-  res.json(data);
-});
+  const $ = cheerio.load(html);
+  let ipos = [];
 
-app.get("/losers", async (req, res) => {
-  const data = await fetchNSE(
-    "https://www.nseindia.com/api/live-analysis-equity-losers"
-  );
-  res.json(data);
-});
+  $("table.table tbody tr").each((i, el) => {
+    const tds = $(el).find("td");
+    if (tds.length >= 5) {
+      ipos.push({
+        name: $(tds[0]).text().trim(),
+        open: $(tds[1]).text().trim(),
+        close: $(tds[2]).text().trim(),
+        price: $(tds[3]).text().trim(),
+        lot: $(tds[4]).text().trim()
+      });
+    }
+  });
 
-app.get("/picks", async (req, res) => {
-  const data = await fetchNSE(
-    "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050"
-  );
-  res.json(data);
-});
+  return ipos.length ? ipos : [{ name: "No IPO found" }];
+}
 
-// Refresh cookie every 15 min
-cron.schedule("*/15 * * * *", () => {
-  console.log("🔄 Refreshing NSE cookie...");
-  refreshCookie();
-});
+// 📰 News (RSS → JSON)
+import Parser from "rss-parser";
+const parser = new Parser();
 
-// Initial cookie fetch
-refreshCookie();
+async function getNews() {
+  try {
+    const feed = await parser.parseURL(NEWS_URL);
+    return feed.items.map(item => ({
+      date: item.pubDate,
+      headline: item.title,
+      link: item.link
+    }));
+  } catch (err) {
+    return [{ headline: "Error fetching news" }];
+  }
+}
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}`);
-});
+// 📈 Gainers / Losers (Yahoo Finance)
+async function getMovers(url) {
+  const data = await fetchJSON(url);
+  if (!data || !data.finance || !data.finance.result) return [];
+  return data.finance.result[0].quotes.map(q => ({
+    symbol: q.symbol,
+    change: q.regularMarketChangePercent
+  }));
+}
+
+// ================== ROUTES ==================
+app.get("/", (req, res) => res.json({ status: "✅ Proxy Live, No fallback" }));
+
+app.get("/news", async (req, res) => res.json(await getNews()));
+app.get("/ipos", async (req, res) => res.json(await getIPOs()));
+app.get("/gainers", async (req, res) => res.json(await getMovers(YAHOO_GAINERS)));
+app.get("/losers", async (req, res) => res.json(await getMovers(YAHOO_LOSERS)));
+
+// ============================================
+app.listen(PORT, () => console.log(`Server running on ${PORT}`));
