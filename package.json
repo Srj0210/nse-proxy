@@ -1,6 +1,7 @@
 {
   "name": "nse-proxy",
   "version": "1.0.0",
+  "description": "Proxy server for fetching NSE/IPO/news data without fallback",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -9,6 +10,7 @@
   "dependencies": {
     "express": "^4.18.2",
     "node-fetch": "^3.3.2",
-    "node-cron": "^3.0.3"
+    "cheerio": "^1.0.0-rc.12",
+    "rss-parser": "^3.13.0"
   }
 }
