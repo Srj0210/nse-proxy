@@ -1,43 +1,58 @@
 import express from "express";
 import fetch from "node-fetch";
+import * as cheerio from "cheerio";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// IPO endpoint (Chittorgarh API)
-app.get("/ipos", async (req, res) => {
+// Root check
+app.get("/", (req, res) => {
+  res.send("IPO Proxy is running ✅. Use /ipo endpoint.");
+});
+
+// IPO Endpoint
+app.get("/ipo", async (req, res) => {
   try {
-    const url = "https://www.chittorgarh.com/api/ipo/ipo_dashboard";
+    const url = "https://www.chittorgarh.com/report/latest-ipo-in-india-list-mainboard-sme/84/"; // IPO list page
     const response = await fetch(url, {
-      timeout: 10000,
       headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
       }
     });
 
-    if (!response.ok) throw new Error("Failed to fetch IPOs");
+    if (!response.ok) {
+      return res.status(500).json({ error: "Failed to fetch IPO page" });
+    }
 
-    const data = await response.json();
+    const body = await response.text();
+    const $ = cheerio.load(body);
 
-    const ipos = data.map(item => ({
-      name: item.IPOName,
-      open: item.OpenDate,
-      close: item.CloseDate,
-      price: item.PriceBand,
-      lotSize: item.MarketLot,
-      status: item.Status
-    }));
+    let ipos = [];
+
+    // scrape IPO table rows
+    $("table.table tbody tr").each((i, el) => {
+      const tds = $(el).find("td");
+      if (tds.length >= 5) {
+        ipos.push({
+          name: $(tds[0]).text().trim(),
+          open: $(tds[1]).text().trim(),
+          close: $(tds[2]).text().trim(),
+          price: $(tds[3]).text().trim()
+        });
+      }
+    });
+
+    if (ipos.length === 0) {
+      return res.json([{ error: "No IPO data found, site structure may have changed" }]);
+    }
 
     res.json(ipos);
   } catch (err) {
-    res.json([{ name: "Error fetching IPO", error: err.message }]);
+    console.error("Error scraping IPO:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Health check
-app.get("/", (req, res) => {
-  res.json({ status: "✅ IPO Proxy Live" });
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
-
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
