@@ -1,41 +1,61 @@
-import express from 'express';
-import fetch from 'node-fetch';
+import express from "express";
+import axios from "axios";
+import * as cheerio from "cheerio";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// IPOAlerts API (free endpoint, open IPOs)
-const IPOALERTS_URL = 'https://api.ipoalerts.in/ipos?status=open';
-
-app.get('/ipo', async (req, res) => {
+// ✅ IPO scraping function
+async function fetchIPOs() {
   try {
-    const resp = await fetch(IPOALERTS_URL);
-    if (!resp.ok) {
-      throw new Error('IPOAlerts API error: ' + resp.status);
-    }
-    const data = await resp.json();
+    const url = "https://www.screener.in/ipo/recent/";
+    const { data } = await axios.get(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+      },
+    });
 
-    // API ka structure check
-    const ipos = Array.isArray(data.ipos) ? data.ipos.map(item => ({
-      name: item.name,
-      open: item.openDate,
-      close: item.closeDate,
-      price: item.issuePrice || item.priceBand,
-      lotSize: item.lotSize || item.marketLot,
-      status: item.status
-    })) : [];
+    const $ = cheerio.load(data);
+    const ipos = [];
 
-    if (ipos.length === 0) {
-      return res.json([{ error: "No IPOs available right now" }]);
-    }
+    $("table tbody tr").each((_, el) => {
+      const name = $(el).find("td:nth-child(1)").text().trim();
+      const listingDate = $(el).find("td:nth-child(2)").text().trim();
+      const mcap = $(el).find("td:nth-child(3)").text().trim();
+      const ipoPrice = $(el).find("td:nth-child(4)").text().trim();
+      const currentPrice = $(el).find("td:nth-child(5)").text().trim();
+      const change = $(el).find("td:nth-child(6)").text().trim();
 
-    res.json(ipos);
+      if (name) {
+        ipos.push({
+          name,
+          listingDate,
+          mcap,
+          ipoPrice,
+          currentPrice,
+          change,
+        });
+      }
+    });
+
+    return ipos.length > 0 ? ipos : [{ error: "No IPO data found" }];
   } catch (err) {
-    res.status(500).json([{ name: 'Error fetching IPOs', error: err.message }]);
+    return [{ error: "Failed to fetch IPOs", details: err.message }];
   }
+}
+
+// ✅ API endpoint
+app.get("/ipo", async (req, res) => {
+  const data = await fetchIPOs();
+  res.json(data);
 });
 
-// Health check
-app.get('/', (req, res) => res.json({ status: '✅ IPO proxy via IPOAlerts working' }));
+// Root
+app.get("/", (req, res) => {
+  res.send("✅ IPO Scraper API running. Use /ipo endpoint.");
+});
 
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
