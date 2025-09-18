@@ -5,106 +5,99 @@ import cron from "node-cron";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-let NSE_COOKIES = "";
+let NSE_COOKIE = "";
+let NSE_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
 
-// 🟢 Function to refresh NSE cookies
-async function refreshCookies() {
+// Function to refresh NSE cookies
+async function refreshCookie() {
   try {
     const res = await fetch("https://www.nseindia.com", {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36",
+        "User-Agent": NSE_USER_AGENT,
+        Accept: "text/html",
       },
     });
 
-    const setCookie = res.headers.raw()["set-cookie"];
-    if (setCookie) {
-      NSE_COOKIES = setCookie.map((c) => c.split(";")[0]).join("; ");
-      console.log("✅ NSE cookies refreshed:", NSE_COOKIES);
+    const cookies = res.headers.get("set-cookie");
+    if (cookies) {
+      NSE_COOKIE = cookies;
+      console.log("✅ NSE Cookie refreshed");
+    } else {
+      console.log("⚠️ Cookie not received, retry later");
     }
   } catch (err) {
     console.error("❌ Cookie refresh failed:", err.message);
   }
 }
 
-// 🟢 Fetch with cookies + block detection
-async function fetchWithCookies(url) {
+// Wrapper to call NSE APIs
+async function fetchNSE(url) {
   try {
     const res = await fetch(url, {
-      method: "GET",
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36",
-        "Accept": "application/json,text/plain,*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.nseindia.com/",
-        "X-Requested-With": "XMLHttpRequest",
-        Cookie: NSE_COOKIES,
+        "User-Agent": NSE_USER_AGENT,
+        Accept: "application/json",
+        Cookie: NSE_COOKIE,
+        Referer: "https://www.nseindia.com/",
       },
-      redirect: "follow",
     });
 
     const text = await res.text();
 
-    // Agar HTML page mila toh block
-    if (text.startsWith("<!DOCTYPE html")) {
-      throw new Error("🚫 Blocked by NSE (Captcha/HTML received)");
+    // Agar HTML aya toh block hua
+    if (text.startsWith("<")) {
+      throw new Error("Blocked by NSE (Captcha/HTML received)");
     }
 
     return JSON.parse(text);
   } catch (err) {
-    console.error("❌ fetchWithCookies error:", err.message);
-    return { error: err.message, url };
+    return { error: "❌ " + err.message, url };
   }
 }
 
-// 🟢 API routes
+// API Routes
 app.get("/", (req, res) => {
-  res.json({ status: "✅ NSE Proxy Live, No fallback" });
+  res.json({ status: "✅ NSE Proxy Live, Cookie Handling Enabled" });
 });
 
 app.get("/ipos", async (req, res) => {
-  const data = await fetchWithCookies(
+  const data = await fetchNSE(
     "https://www.nseindia.com/api/ipo-current-issues"
   );
   res.json(data);
 });
 
 app.get("/gainers", async (req, res) => {
-  const data = await fetchWithCookies(
-    "https://www.nseindia.com/api/live-analysis-variations?index=gainers"
+  const data = await fetchNSE(
+    "https://www.nseindia.com/api/live-analysis-equity-gainers"
   );
   res.json(data);
 });
 
 app.get("/losers", async (req, res) => {
-  const data = await fetchWithCookies(
-    "https://www.nseindia.com/api/live-analysis-variations?index=losers"
+  const data = await fetchNSE(
+    "https://www.nseindia.com/api/live-analysis-equity-losers"
   );
   res.json(data);
 });
 
 app.get("/picks", async (req, res) => {
-  const g = await fetchWithCookies(
-    "https://www.nseindia.com/api/live-analysis-variations?index=gainers"
+  const data = await fetchNSE(
+    "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050"
   );
-  const l = await fetchWithCookies(
-    "https://www.nseindia.com/api/live-analysis-variations?index=losers"
-  );
-
-  res.json({
-    picks: [
-      { type: "Long", stock: g?.data?.[0]?.symbol || "No data" },
-      { type: "Short", stock: l?.data?.[0]?.symbol || "No data" },
-    ],
-  });
+  res.json(data);
 });
 
-// 🟢 Refresh cookies every 15 min
-cron.schedule("*/15 * * * *", refreshCookies);
+// Refresh cookie every 15 min
+cron.schedule("*/15 * * * *", () => {
+  console.log("🔄 Refreshing NSE cookie...");
+  refreshCookie();
+});
 
-// 🟢 Start server
-app.listen(PORT, async () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  await refreshCookies();
+// Initial cookie fetch
+refreshCookie();
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
