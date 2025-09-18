@@ -1,5 +1,5 @@
 {
-  "name": "ipo-proxy",
+  "name": "ipoalerts-proxy",
   "version": "1.0.0",
   "main": "server.js",
   "type": "module",
@@ -8,7 +8,6 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "node-fetch": "^3.3.2",
-    "cheerio": "^1.0.0-rc.12"
+    "node-fetch": "^3.3.2"
   }
 }
