@@ -15,15 +15,19 @@ app.get('/ipo', async (req, res) => {
     }
     const data = await resp.json();
 
-    // Format IPO data
-    const ipos = data.map(item => ({
+    // API ka structure check
+    const ipos = Array.isArray(data.ipos) ? data.ipos.map(item => ({
       name: item.name,
       open: item.openDate,
       close: item.closeDate,
       price: item.issuePrice || item.priceBand,
       lotSize: item.lotSize || item.marketLot,
       status: item.status
-    }));
+    })) : [];
+
+    if (ipos.length === 0) {
+      return res.json([{ error: "No IPOs available right now" }]);
+    }
 
     res.json(ipos);
   } catch (err) {
@@ -32,6 +36,6 @@ app.get('/ipo', async (req, res) => {
 });
 
 // Health check
-app.get('/', (req, res) => res.json({ status: '✅ IPO proxy via IPOAlerts' }));
+app.get('/', (req, res) => res.json({ status: '✅ IPO proxy via IPOAlerts working' }));
 
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
