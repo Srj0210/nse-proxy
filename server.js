@@ -5,104 +5,118 @@ import cron from "node-cron";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ================== CONFIG ==================
-let nseCookies = null;
-let nseHeaders = {
+// NSE headers (to avoid 403)
+const NSE_HEADERS = {
   "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115.0 Safari/537.36",
   Accept: "application/json",
   "Accept-Language": "en-US,en;q=0.9",
-  Connection: "keep-alive",
 };
 
-// NSE URLs
-const NSE_URLS = {
-  ipo: "https://www.nseindia.com/api/ipo-current-issues",
-  gainers: "https://www.nseindia.com/api/live-analysis-variations?index=gainers",
-  losers: "https://www.nseindia.com/api/live-analysis-variations?index=losers",
-  picks: "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050",
+// In-memory cache
+let cache = {
+  ipos: [],
+  gainers: [],
+  losers: [],
+  lastUpdated: null,
 };
 
-// ================== COOKIE REFRESH ==================
-async function refreshCookies() {
+// --------- Helper: fetch NSE data with headers ---------
+async function fetchNSE(url) {
   try {
-    console.log("🔄 Refreshing NSE cookies...");
-    const res = await fetch("https://www.nseindia.com", { headers: nseHeaders });
-    if (res.ok) {
-      const setCookies = res.headers.raw()["set-cookie"];
-      if (setCookies) {
-        nseCookies = setCookies.map((c) => c.split(";")[0]).join("; ");
-        console.log("✅ NSE cookies updated");
-      }
-    }
-  } catch (err) {
-    console.error("❌ Cookie refresh failed:", err.message);
-  }
-}
-
-// Run immediately on start
-await refreshCookies();
-
-// Run every 15 minutes
-cron.schedule("*/15 * * * *", refreshCookies);
-
-// ================== FETCH FUNCTION ==================
-async function fetchFromNSE(url) {
-  try {
-    const res = await fetch(url, {
-      headers: { ...nseHeaders, Cookie: nseCookies },
-    });
-
-    if (!res.ok) throw new Error("NSE fetch failed " + res.status);
+    const res = await fetch(url, { headers: NSE_HEADERS });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
-    console.error("❌ Fetch error:", err.message);
-    throw err;
+    console.error("Fetch error:", err.message);
+    return null;
   }
 }
 
-// ================== ROUTES ==================
-app.get("/", (req, res) => {
-  res.json({ status: "✅ NSE Proxy Live", fallback: false });
-});
+// --------- Endpoints ---------
 
+// IPOs
 app.get("/ipos", async (req, res) => {
-  try {
-    const data = await fetchFromNSE(NSE_URLS.ipo);
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "NSE IPO fetch failed" });
-  }
+  let data = await fetchNSE("https://www.nseindia.com/api/ipo-current-issues");
+  if (!data || !data.data) return res.json(cache.ipos); // return cache if fail
+
+  const ipos = data.data.map((i) => ({
+    name: i.companyName || i.name,
+    open: i.openDate,
+    close: i.closeDate,
+    price: i.priceBand,
+  }));
+  cache.ipos = ipos;
+  cache.lastUpdated = new Date();
+  res.json(ipos);
 });
 
+// Gainers
 app.get("/gainers", async (req, res) => {
-  try {
-    const data = await fetchFromNSE(NSE_URLS.gainers);
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "NSE Gainers fetch failed" });
-  }
+  let data = await fetchNSE(
+    "https://www.nseindia.com/api/live-analysis-variations?index=gainers"
+  );
+  if (!data || !data.data) return res.json(cache.gainers);
+
+  const gainers = data.data.map((g) => ({
+    symbol: g.symbol,
+    change: g.netPrice,
+  }));
+  cache.gainers = gainers;
+  cache.lastUpdated = new Date();
+  res.json(gainers);
 });
 
+// Losers
 app.get("/losers", async (req, res) => {
-  try {
-    const data = await fetchFromNSE(NSE_URLS.losers);
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "NSE Losers fetch failed" });
-  }
+  let data = await fetchNSE(
+    "https://www.nseindia.com/api/live-analysis-variations?index=loosers"
+  );
+  if (!data || !data.data) return res.json(cache.losers);
+
+  const losers = data.data.map((l) => ({
+    symbol: l.symbol,
+    change: l.netPrice,
+  }));
+  cache.losers = losers;
+  cache.lastUpdated = new Date();
+  res.json(losers);
 });
 
-app.get("/picks", async (req, res) => {
-  try {
-    const data = await fetchFromNSE(NSE_URLS.picks);
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "NSE Picks fetch failed" });
+// Picks (auto from top gainer/loser)
+app.get("/picks", (req, res) => {
+  const picks = [];
+  if (cache.gainers.length > 0) {
+    picks.push({
+      type: "Long",
+      stock: cache.gainers[0].symbol,
+      reason: "Top gainer stock",
+    });
   }
+  if (cache.losers.length > 0) {
+    picks.push({
+      type: "Short",
+      stock: cache.losers[0].symbol,
+      reason: "Top loser stock",
+    });
+  }
+  res.json(picks);
 });
 
-// ================== START ==================
+// Health check
+app.get("/", (req, res) => {
+  res.send("✅ NSE Proxy is running");
+});
+
+// --------- Cron: refresh cache every 15 min ---------
+cron.schedule("*/15 * * * *", async () => {
+  console.log("⏳ Refreshing NSE cache...");
+  await fetch("http://localhost:" + PORT + "/ipos");
+  await fetch("http://localhost:" + PORT + "/gainers");
+  await fetch("http://localhost:" + PORT + "/losers");
+});
+
+// Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
