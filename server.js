@@ -1,71 +1,92 @@
 import express from "express";
-import cors from "cors";
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
+import cors from "cors";
 
 const app = express();
 app.use(cors());
 
-// Root endpoint test
-app.get("/", (req, res) => {
-  res.json({ message: "✅ Server is running fine 🚀" });
-});
+const PORT = process.env.PORT || 10000;
 
-// Example route (Recent IPOs)
+// Helper function
+const cleanText = (txt) => txt.replace(/\s+/g, " ").trim();
+
+// ✅ Scraper for Recent IPOs
+async function scrapeRecentIPOs() {
+  const url = "https://www.screener.in/ipo/recent/";
+  const res = await fetch(url);
+  const html = await res.text();
+  const $ = cheerio.load(html);
+
+  const data = [];
+  $("table tbody tr").each((i, el) => {
+    const tds = $(el).find("td");
+    if (tds.length > 0) {
+      data.push({
+        name: cleanText($(tds[0]).text()),
+        date: cleanText($(tds[1]).text()),
+        mcap: cleanText($(tds[2]).text()),
+        ipoPrice: cleanText($(tds[3]).text()),
+        currentPrice: cleanText($(tds[4]).text()),
+        change: cleanText($(tds[5]).text())
+      });
+    }
+  });
+
+  return data;
+}
+
+// ✅ Scraper for Upcoming IPOs
+async function scrapeUpcomingIPOs() {
+  const url = "https://www.screener.in/ipo/";
+  const res = await fetch(url);
+  const html = await res.text();
+  const $ = cheerio.load(html);
+
+  const data = [];
+  $("table tbody tr").each((i, el) => {
+    const tds = $(el).find("td");
+    if (tds.length > 0) {
+      data.push({
+        name: cleanText($(tds[0]).text()),
+        subscriptionPeriod: cleanText($(tds[1]).text()),
+        listingDate: cleanText($(tds[2]).text()),
+        mcap: cleanText($(tds[3]).text()),
+        subsTimes: cleanText($(tds[4]).text()),
+        pe: cleanText($(tds[5]).text()),
+        roce: cleanText($(tds[6]).text())
+      });
+    }
+  });
+
+  return data;
+}
+
+// ✅ Routes
 app.get("/ipo/recent", async (req, res) => {
   try {
-    const response = await fetch("https://www.screener.in/ipo/recent/");
-    const html = await response.text();
-    const $ = cheerio.load(html);
-
-    const data = [];
-    $("table tbody tr").each((i, el) => {
-      const name = $(el).find("td:nth-child(1)").text().trim();
-      const date = $(el).find("td:nth-child(2)").text().trim();
-      const mcap = $(el).find("td:nth-child(3)").text().trim();
-      const price = $(el).find("td:nth-child(4)").text().trim();
-      const change = $(el).find("td:nth-child(6)").text().trim();
-      if (name) {
-        data.push({ name, date, mcap, price, change });
-      }
-    });
-
+    const data = await scrapeRecentIPOs();
     res.json(data);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch recent IPOs" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Example route (Upcoming IPOs)
 app.get("/ipo/upcoming", async (req, res) => {
   try {
-    const response = await fetch("https://www.screener.in/ipo/");
-    const html = await response.text();
-    const $ = cheerio.load(html);
-
-    const data = [];
-    $("table tbody tr").each((i, el) => {
-      const name = $(el).find("td:nth-child(1)").text().trim();
-      const subscription = $(el).find("td:nth-child(2)").text().trim();
-      const listingDate = $(el).find("td:nth-child(3)").text().trim();
-      const mcap = $(el).find("td:nth-child(4)").text().trim();
-      const pe = $(el).find("td:nth-child(6)").text().trim();
-      const roce = $(el).find("td:nth-child(7)").text().trim();
-      if (name) {
-        data.push({ name, subscription, listingDate, mcap, pe, roce });
-      }
-    });
-
+    const data = await scrapeUpcomingIPOs();
     res.json(data);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch upcoming IPOs" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Server listen
-const PORT = process.env.PORT || 10000;
+// Root
+app.get("/", (req, res) => {
+  res.json({ message: "🚀 IPO Scraper API running successfully!" });
+});
+
+// Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
