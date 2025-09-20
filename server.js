@@ -6,87 +6,73 @@ import cors from "cors";
 const app = express();
 app.use(cors());
 
-const PORT = process.env.PORT || 10000;
-
-// Helper function
-const cleanText = (txt) => txt.replace(/\s+/g, " ").trim();
-
-// ✅ Scraper for Recent IPOs
-async function scrapeRecentIPOs() {
-  const url = "https://www.screener.in/ipo/recent/";
-  const res = await fetch(url);
-  const html = await res.text();
-  const $ = cheerio.load(html);
-
-  const data = [];
-  $("table tbody tr").each((i, el) => {
-    const tds = $(el).find("td");
-    if (tds.length > 0) {
-      data.push({
-        name: cleanText($(tds[0]).text()),
-        date: cleanText($(tds[1]).text()),
-        mcap: cleanText($(tds[2]).text()),
-        ipoPrice: cleanText($(tds[3]).text()),
-        currentPrice: cleanText($(tds[4]).text()),
-        change: cleanText($(tds[5]).text())
-      });
-    }
-  });
-
-  return data;
+// Helper: trim aur line-break clean
+function cleanText(txt) {
+  return txt.replace(/\s+/g, " ").trim();
 }
 
-// ✅ Scraper for Upcoming IPOs
-async function scrapeUpcomingIPOs() {
-  const url = "https://www.screener.in/ipo/";
-  const res = await fetch(url);
-  const html = await res.text();
-  const $ = cheerio.load(html);
-
-  const data = [];
-  $("table tbody tr").each((i, el) => {
-    const tds = $(el).find("td");
-    if (tds.length > 0) {
-      data.push({
-        name: cleanText($(tds[0]).text()),
-        subscriptionPeriod: cleanText($(tds[1]).text()),
-        listingDate: cleanText($(tds[2]).text()),
-        mcap: cleanText($(tds[3]).text()),
-        subsTimes: cleanText($(tds[4]).text()),
-        pe: cleanText($(tds[5]).text()),
-        roce: cleanText($(tds[6]).text())
-      });
-    }
-  });
-
-  return data;
-}
-
-// ✅ Routes
-app.get("/ipo/recent", async (req, res) => {
-  try {
-    const data = await scrapeRecentIPOs();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// 🔹 Upcoming IPOs
 app.get("/ipo/upcoming", async (req, res) => {
   try {
-    const data = await scrapeUpcomingIPOs();
+    const response = await fetch("https://www.screener.in/ipo/");
+    const body = await response.text();
+    const $ = cheerio.load(body);
+
+    let data = [];
+    $("table tbody tr").each((i, el) => {
+      let tds = $(el).find("td");
+      if (tds.length >= 4) {
+        data.push({
+          name: cleanText($(tds[0]).text()),
+          subscriptionPeriod: cleanText($(tds[1]).text()),
+          listingDate: cleanText($(tds[2]).text()),
+          mcap: cleanText($(tds[3]).text())
+        });
+      }
+    });
+
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch upcoming IPOs" });
   }
 });
 
-// Root
-app.get("/", (req, res) => {
-  res.json({ message: "🚀 IPO Scraper API running successfully!" });
+// 🔹 Recent IPOs
+app.get("/ipo/recent", async (req, res) => {
+  try {
+    const response = await fetch("https://www.screener.in/ipo/recent/");
+    const body = await response.text();
+    const $ = cheerio.load(body);
+
+    let data = [];
+    $("table tbody tr").each((i, el) => {
+      let tds = $(el).find("td");
+      if (tds.length >= 5) {
+        data.push({
+          name: cleanText($(tds[0]).text()),
+          date: cleanText($(tds[1]).text()),
+          mcap: cleanText($(tds[2]).text()),
+          ipoPrice: cleanText($(tds[3]).text()),
+          currentPrice: cleanText($(tds[4]).text())
+        });
+      }
+    });
+
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch recent IPOs" });
+  }
 });
 
-// Start server
+// 🔹 Root test
+app.get("/", (req, res) => {
+  res.json({ message: "🚀 NSE Proxy Server is running!" });
+});
+
+// 🔹 PORT setup for Render
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
