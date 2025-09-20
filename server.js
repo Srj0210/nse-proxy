@@ -1,93 +1,97 @@
 import express from "express";
 import fetch from "node-fetch";
+import cheerio from "cheerio";
 import cors from "cors";
 
 const app = express();
 app.use(cors());
 
-// ========== Helper ==========
-async function fetchHTML(url) {
-  const res = await fetch(url, {
+const PORT = process.env.PORT || 3000;
+
+// 🟢 Helper function to fetch page with headers
+async function fetchPage(url) {
+  const response = await fetch(url, {
     headers: {
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/118 Safari/537.36",
-    },
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+      "Accept": "text/html"
+    }
   });
-  return res.text();
+  return await response.text();
 }
 
-function extractCleanText(str) {
-  return str.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
-}
-
-// ========== Upcoming IPOs ==========
+// 🟢 Upcoming IPO route
 app.get("/ipo/upcoming", async (req, res) => {
   try {
-    const url = "https://www.screener.in/ipos/upcoming/";
-    const html = await fetchHTML(url);
+    const html = await fetchPage("https://www.screener.in/ipo/");
+    const $ = cheerio.load(html);
 
-    const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)];
-    const data = [];
+    let data = [];
 
-    rows.forEach((r) => {
-      const cols = [...r[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) =>
-        extractCleanText(c[1])
-      );
-      if (cols.length >= 5 && !cols[0].includes("Institutional")) {
+    $("table.data-table tbody tr").each((i, el) => {
+      const name = $(el).find("td:nth-child(1)").text().trim();
+      const subscription = $(el).find("td:nth-child(2)").text().trim();
+      const listingDate = $(el).find("td:nth-child(3)").text().trim();
+      const mcap = $(el).find("td:nth-child(4)").text().trim();
+      const subscriptionRate = $(el).find("td:nth-child(5)").text().trim();
+      const pe = $(el).find("td:nth-child(6)").text().trim();
+      const roce = $(el).find("td:nth-child(7)").text().trim();
+
+      if (name) {
         data.push({
-          name: cols[0],
-          open: cols[1],
-          close: cols[2],
-          priceBand: cols[3],
-          mcap: cols[4],
+          name,
+          subscription,
+          listingDate,
+          mcap,
+          subscriptionRate,
+          pe,
+          roce
         });
       }
     });
 
     res.json(data);
   } catch (err) {
-    console.error("Upcoming IPO Error:", err);
-    res.status(500).json({ error: "Failed to fetch upcoming IPOs" });
+    console.error("❌ Error in /ipo/upcoming:", err.message);
+    res.status(500).json({ error: "Scraping failed" });
   }
 });
 
-// ========== Recent IPOs ==========
+// 🟢 Recent IPO route
 app.get("/ipo/recent", async (req, res) => {
   try {
-    const url = "https://www.screener.in/ipos/recent/";
-    const html = await fetchHTML(url);
+    const html = await fetchPage("https://www.screener.in/ipo/recent/");
+    const $ = cheerio.load(html);
 
-    const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)];
-    const data = [];
+    let data = [];
 
-    rows.forEach((r) => {
-      const cols = [...r[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) =>
-        extractCleanText(c[1])
-      );
-      if (cols.length >= 5 && !cols[0].includes("Institutional")) {
+    $("table.data-table tbody tr").each((i, el) => {
+      const name = $(el).find("td:nth-child(1)").text().trim();
+      const listingDate = $(el).find("td:nth-child(2)").text().trim();
+      const ipoMcap = $(el).find("td:nth-child(3)").text().trim();
+      const ipoPrice = $(el).find("td:nth-child(4)").text().trim();
+      const currentPrice = $(el).find("td:nth-child(5)").text().trim();
+      const change = $(el).find("td:nth-child(6)").text().trim();
+
+      if (name) {
         data.push({
-          name: cols[0],
-          listingDate: cols[1],
-          mcap: cols[2],
-          price: cols[3],
-          change: cols[4],
+          name,
+          listingDate,
+          ipoMcap,
+          ipoPrice,
+          currentPrice,
+          change
         });
       }
     });
 
     res.json(data);
   } catch (err) {
-    console.error("Recent IPO Error:", err);
-    res.status(500).json({ error: "Failed to fetch recent IPOs" });
+    console.error("❌ Error in /ipo/recent:", err.message);
+    res.status(500).json({ error: "Scraping failed" });
   }
 });
 
-// ========== Root ==========
-app.get("/", (req, res) => {
-  res.send("✅ NSE Proxy API Running!");
-});
-
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
